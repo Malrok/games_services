@@ -11,6 +11,12 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.games.AchievementsClient
 import com.google.android.gms.games.Games
 import com.google.android.gms.games.LeaderboardsClient
+import com.google.android.gms.games.SnapshotsClient
+import com.google.android.gms.games.SnapshotsClient.DataOrConflict
+import com.google.android.gms.games.snapshot.Snapshot
+import com.google.android.gms.games.snapshot.SnapshotMetadataChange
+import com.google.android.gms.tasks.Task
+import com.google.android.gms.tasks.TaskCompletionSource
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -21,10 +27,13 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
+import java.io.IOException
 
 
 private const val CHANNEL_NAME = "games_services"
 private const val RC_SIGN_IN = 9000
+private const val SAVE_FILENAME = "data_save_filename"
+private const val SAVE_DESCRIPTION = "data_save_description"
 
 class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
 
@@ -127,6 +136,110 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
   private fun showLoginErrorIfNotLoggedIn(result: Result) {
     if (achievementClient == null || leaderboardsClient == null) {
       result.error("error", "Please make sure to call signIn() first", null)
+    }
+  }
+  //endregion
+
+  //region save/load data
+  private fun saveData(data: String, result: Result) {
+    val snapshotsClient = Games.getSnapshotsClient(activity!!, GoogleSignIn.getLastSignedInAccount(activity)!!)
+
+    val task = snapshotsClient.open(SAVE_FILENAME, true)
+    task.addOnSuccessListener { dataOrConflict ->
+      this.processSnapshotOpenResult(data.toByteArray(), result, dataOrConflict, snapshotsClient, 3)
+    }.addOnFailureListener {
+      result.error("error", it.localizedMessage, null)
+    }
+  }
+
+  private fun processSnapshotOpenResult(data: ByteArray, result: Result, dataOrConflict: DataOrConflict<Snapshot>,
+                                         snapshotsClient: SnapshotsClient,
+                                         retryCount: Int): Task<Snapshot?>?
+  {
+    if (dataOrConflict.isConflict) {
+      return manageConflict(data, result, dataOrConflict, snapshotsClient, retryCount - 1)
+    } else {
+      val snapshotContents = dataOrConflict.conflict?.resolutionSnapshotContents
+      val snapshot = dataOrConflict.data
+      if (snapshotContents != null) {
+        snapshotContents.writeBytes(data)
+        val metadataChange = SnapshotMetadataChange.Builder()
+                .setDescription(SAVE_DESCRIPTION)
+                .build()
+
+        // Commit the operation
+        snapshotsClient.commitAndClose(snapshot!!, metadataChange)
+                .addOnSuccessListener {
+                  result.success("success")
+                }
+                .addOnFailureListener { exception ->
+                  result.error("error", exception.localizedMessage, null)
+                }
+        val source: TaskCompletionSource<Snapshot> = TaskCompletionSource()
+        source.setResult(snapshot)
+        return source.task!!
+      } else {
+        result.error("error", "could not get a SnapshotContent object", null)
+        return null
+      }
+    }
+  }
+
+  private fun manageConflict(data: ByteArray, result: Result, dataOrConflict: DataOrConflict<Snapshot>,
+                             snapshotsClient: SnapshotsClient,
+                             retryCount: Int): Task<Snapshot?>? {
+    // There was a conflict.  Try resolving it by selecting the newest of the conflicting snapshots.
+    // This is the same as using RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED as a conflict resolution
+    // policy, but we are implementing it as an example of a manual resolution.
+    // One option is to present a UI to the user to choose which snapshot to resolve.
+
+    val conflict = dataOrConflict.conflict!!
+    val snapshot: Snapshot = conflict.snapshot!!
+    val conflictSnapshot: Snapshot = conflict.conflictingSnapshot!!
+
+    // Resolve between conflicts by selecting the newest of the conflicting snapshots.
+
+    // Resolve between conflicts by selecting the newest of the conflicting snapshots.
+    var resolvedSnapshot: Snapshot = snapshot
+
+    if (snapshot.metadata.lastModifiedTimestamp <
+            conflictSnapshot.metadata.lastModifiedTimestamp) {
+      resolvedSnapshot = conflictSnapshot
+    }
+
+    return snapshotsClient
+            .resolveConflict(conflict.conflictId, resolvedSnapshot)
+            .continueWithTask { task -> // Resolving the conflict may cause another conflict,
+              // so recurse and try another resolution.
+              if (retryCount > 0) {
+                task.result?.let { processSnapshotOpenResult(data, result, it, snapshotsClient, retryCount) }
+              } else {
+                throw Exception("Could not resolve snapshot conflicts")
+              }
+            }
+
+  }
+
+  private fun loadData(result: Result) {
+    val snapshotsClient = Games.getSnapshotsClient(activity!!, GoogleSignIn.getLastSignedInAccount(activity)!!)
+
+    val task = snapshotsClient.open(SAVE_FILENAME, true)
+    task.addOnSuccessListener { dataOrConflict ->
+      dataOrConflict.apply {
+        val snapshotContents = this.conflict?.resolutionSnapshotContents
+        if (snapshotContents != null) {
+          try {
+            val bytes = snapshotContents.readFully()
+            result.success(String(bytes))
+          } catch (error: IOException) {
+            result.error("error", "exception raised while reading data", null)
+          }
+        } else {
+          result.error("error", "could not get a SnapshotContent object", null)
+        }
+      }
+    }.addOnFailureListener {
+      result.error("error", it.localizedMessage, null)
     }
   }
   //endregion
@@ -234,6 +347,13 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
       Methods.silentSignIn -> {
         silentSignIn(result)
       }
+      Methods.saveData -> {
+        val data = call.argument<String>("data") ?: ""
+        saveData(data, result)
+      }
+      Methods.loadData -> {
+        loadData(result)
+      }
       else -> result.notImplemented()
     }
   }
@@ -246,4 +366,6 @@ object Methods {
   const val showLeaderboards = "showLeaderboards"
   const val showAchievements = "showAchievements"
   const val silentSignIn = "silentSignIn"
+  const val saveData = "saveData"
+  const val loadData = "loadData"
 }
