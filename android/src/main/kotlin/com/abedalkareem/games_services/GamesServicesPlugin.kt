@@ -175,9 +175,9 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
                 .addOnFailureListener { exception ->
                   result.error("error", exception.localizedMessage, null)
                 }
-        val source: TaskCompletionSource<Snapshot> = TaskCompletionSource()
+        val source: TaskCompletionSource<Snapshot?> = TaskCompletionSource()
         source.setResult(snapshot)
-        return source.task!!
+        return source.task
       } else {
         result.error("error", "could not get a SnapshotContent object", null)
         return null
