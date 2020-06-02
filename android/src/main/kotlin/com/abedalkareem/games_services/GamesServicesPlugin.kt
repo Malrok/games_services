@@ -8,6 +8,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.drive.Drive
 import com.google.android.gms.games.AchievementsClient
 import com.google.android.gms.games.Games
 import com.google.android.gms.games.LeaderboardsClient
@@ -61,6 +62,7 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
     val activity = activity ?: return
     val builder = GoogleSignInOptions.Builder(
             GoogleSignInOptions.DEFAULT_GAMES_SIGN_IN)
+            .requestScopes(Drive.SCOPE_APPFOLDER)
     googleSignInClient = GoogleSignIn.getClient(activity, builder.build())
     googleSignInClient?.silentSignIn()?.addOnCompleteListener { task ->
       pendingOperation = PendingOperation(Methods.silentSignIn, result)
@@ -144,22 +146,21 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
   private fun saveData(data: String, result: Result) {
     val snapshotsClient = Games.getSnapshotsClient(activity!!, GoogleSignIn.getLastSignedInAccount(activity)!!)
 
-    val task = snapshotsClient.open(SAVE_FILENAME, true)
+    val task = snapshotsClient.open(SAVE_FILENAME, true, SnapshotsClient.RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED)
     task.addOnSuccessListener { dataOrConflict ->
-      this.processSnapshotOpenResult(data.toByteArray(), result, dataOrConflict, snapshotsClient, 3)
+      this.processSnapshotOpenResult(data.toByteArray(), result, dataOrConflict, snapshotsClient)
     }.addOnFailureListener {
       result.error("error", it.localizedMessage, null)
     }
   }
 
   private fun processSnapshotOpenResult(data: ByteArray, result: Result, dataOrConflict: DataOrConflict<Snapshot>,
-                                         snapshotsClient: SnapshotsClient,
-                                         retryCount: Int): Task<Snapshot?>?
+                                         snapshotsClient: SnapshotsClient)
   {
     if (dataOrConflict.isConflict) {
-      return manageConflict(data, result, dataOrConflict, snapshotsClient, retryCount - 1)
+      result.error("error", "unresolved conflict found in game saves", null)
     } else {
-      val snapshotContents = dataOrConflict.conflict?.resolutionSnapshotContents
+      val snapshotContents = dataOrConflict.data?.snapshotContents
       val snapshot = dataOrConflict.data
       if (snapshotContents != null) {
         snapshotContents.writeBytes(data)
@@ -177,56 +178,19 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
                 }
         val source: TaskCompletionSource<Snapshot?> = TaskCompletionSource()
         source.setResult(snapshot)
-        return source.task
       } else {
         result.error("error", "could not get a SnapshotContent object", null)
-        return null
       }
     }
-  }
-
-  private fun manageConflict(data: ByteArray, result: Result, dataOrConflict: DataOrConflict<Snapshot>,
-                             snapshotsClient: SnapshotsClient,
-                             retryCount: Int): Task<Snapshot?>? {
-    // There was a conflict.  Try resolving it by selecting the newest of the conflicting snapshots.
-    // This is the same as using RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED as a conflict resolution
-    // policy, but we are implementing it as an example of a manual resolution.
-    // One option is to present a UI to the user to choose which snapshot to resolve.
-
-    val conflict = dataOrConflict.conflict!!
-    val snapshot: Snapshot = conflict.snapshot!!
-    val conflictSnapshot: Snapshot = conflict.conflictingSnapshot!!
-
-    // Resolve between conflicts by selecting the newest of the conflicting snapshots.
-
-    // Resolve between conflicts by selecting the newest of the conflicting snapshots.
-    var resolvedSnapshot: Snapshot = snapshot
-
-    if (snapshot.metadata.lastModifiedTimestamp <
-            conflictSnapshot.metadata.lastModifiedTimestamp) {
-      resolvedSnapshot = conflictSnapshot
-    }
-
-    return snapshotsClient
-            .resolveConflict(conflict.conflictId, resolvedSnapshot)
-            .continueWithTask { task -> // Resolving the conflict may cause another conflict,
-              // so recurse and try another resolution.
-              if (retryCount > 0) {
-                task.result?.let { processSnapshotOpenResult(data, result, it, snapshotsClient, retryCount) }
-              } else {
-                throw Exception("Could not resolve snapshot conflicts")
-              }
-            }
-
   }
 
   private fun loadData(result: Result) {
     val snapshotsClient = Games.getSnapshotsClient(activity!!, GoogleSignIn.getLastSignedInAccount(activity)!!)
 
-    val task = snapshotsClient.open(SAVE_FILENAME, true)
+    val task = snapshotsClient.open(SAVE_FILENAME, true, SnapshotsClient.RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED)
     task.addOnSuccessListener { dataOrConflict ->
       dataOrConflict.apply {
-        val snapshotContents = this.conflict?.resolutionSnapshotContents
+        val snapshotContents = this.data?.snapshotContents
         if (snapshotContents != null) {
           try {
             val bytes = snapshotContents.readFully()
