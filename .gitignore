@@ -6,6 +6,24 @@
 
 build/
 
+.idea/markdown*
+
+# Flutter/Dart/Pub related
+**/doc/api/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+
+# Web related
+lib/generated_plugin_registrant.dart
+
+# Exceptions to above rules.
+!/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+
 #https://github.com/github/gitignore/blob/599646e9d0a26283d67715dead8f26e0eb2df753/Global/JetBrains.gitignore
 # User-specific stuff
 .idea/**/workspace.xml
