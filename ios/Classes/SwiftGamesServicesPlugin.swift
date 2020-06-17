@@ -3,6 +3,7 @@ import UIKit
 import GameKit
 
 public class SwiftGamesServicesPlugin: NSObject, FlutterPlugin {
+    var alreadyAuthenticated: Bool = false
 
     // MARK: - Properties
 
@@ -14,7 +15,15 @@ public class SwiftGamesServicesPlugin: NSObject, FlutterPlugin {
 
     func authenticateUser(result: @escaping FlutterResult) {
         let player = GKLocalPlayer.local
+
+        if self.alreadyAuthenticated {
+            result("success")
+            return
+        }
+
         player.authenticateHandler = { vc, error in
+            self.alreadyAuthenticated = true
+
             guard error == nil else {
                 result(FlutterError( code: "authError",
                                      message: error?.localizedDescription ?? "",
@@ -26,7 +35,9 @@ public class SwiftGamesServicesPlugin: NSObject, FlutterPlugin {
             } else if player.isAuthenticated {
                 result("success")
             } else {
-                result("error")
+                result(FlutterError( code: "error",
+                                     message: "Unknown authenticateHandler error",
+                                     details: "" ))
             }
         }
     }
