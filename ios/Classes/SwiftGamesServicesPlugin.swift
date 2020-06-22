@@ -109,7 +109,7 @@ public class SwiftGamesServicesPlugin: NSObject, FlutterPlugin {
 
     func load(result: @escaping FlutterResult) {
         let player = GKLocalPlayer.local
-        if !player.isAuthenticated {
+        if !alreadyAuthenticated || !player.isAuthenticated {
             result(FlutterError(code: "playerNotAuthenticated", message: "Local player is not authenticated", details: nil))
             return
         }
@@ -135,8 +135,10 @@ public class SwiftGamesServicesPlugin: NSObject, FlutterPlugin {
                         player.resolveConflictingSavedGames(games, with: data, completionHandler: nil)
                     }
                     // return last data
-                    result(String.init(data: data, encoding: .utf8));
-                };
+                    result(String.init(data: data, encoding: .utf8))
+                }
+            } else {
+                result("")
             }
         }
     }
