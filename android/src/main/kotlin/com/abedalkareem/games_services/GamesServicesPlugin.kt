@@ -144,6 +144,9 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
 
   //region save/load data
   private fun saveData(data: String, result: Result) {
+    if (achievementClient == null || leaderboardsClient == null) {
+      result.success("could not save as we're not logged in");
+    }
     val snapshotsClient = Games.getSnapshotsClient(activity!!, GoogleSignIn.getLastSignedInAccount(activity)!!)
 
     val task = snapshotsClient.open(SAVE_FILENAME, true, SnapshotsClient.RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED)
@@ -185,6 +188,9 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
   }
 
   private fun loadData(result: Result) {
+    if (achievementClient == null || leaderboardsClient == null) {
+      result.success("could not load as we're not logged in");
+    }
     val snapshotsClient = Games.getSnapshotsClient(activity!!, GoogleSignIn.getLastSignedInAccount(activity)!!)
 
     val task = snapshotsClient.open(SAVE_FILENAME, true, SnapshotsClient.RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED)
