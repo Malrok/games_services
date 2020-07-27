@@ -271,9 +271,11 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
   }
 
   private fun finishPendingOperationWithError(errorMessage: String) {
-    Log.i(pendingOperation!!.method, "error")
-    pendingOperation!!.result.error("error", errorMessage, null)
-    pendingOperation = null
+    if (pendingOperation != null) {
+      Log.i(pendingOperation!!.method, "error")
+      pendingOperation!!.result.error("error", errorMessage, null)
+      pendingOperation = null
+    }
   }
   //endregion
 
