@@ -45,6 +45,7 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
   private var activityPluginBinding: ActivityPluginBinding? = null
   private var channel: MethodChannel? = null
   private var pendingOperation: PendingOperation? = null
+  private var hasUserCanceled = false
   //endregion
 
   companion object {
@@ -59,20 +60,23 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
 
   //region SignIn
   private fun silentSignIn(result: Result) {
-    val activity = activity ?: return
-    val builder = GoogleSignInOptions.Builder(
-            GoogleSignInOptions.DEFAULT_GAMES_SIGN_IN)
-            .requestScopes(Drive.SCOPE_APPFOLDER)
-    googleSignInClient = GoogleSignIn.getClient(activity, builder.build())
-    googleSignInClient?.silentSignIn()?.addOnCompleteListener { task ->
-      pendingOperation = PendingOperation(Methods.silentSignIn, result)
-      if (task.isSuccessful) {
-        val googleSignInAccount = task.result
-        handleSignInResult(googleSignInAccount!!)
-      } else {
-        Log.e("Error", "signInError", task.exception)
-        Log.i("ExplicitSignIn", "Trying explicit sign in")
-        explicitSignIn()
+    if (!hasUserCanceled) {
+      // if the user has refused once, do not try to sign in again
+      val activity = activity ?: return
+      val builder = GoogleSignInOptions.Builder(
+              GoogleSignInOptions.DEFAULT_GAMES_SIGN_IN)
+              .requestScopes(Drive.SCOPE_APPFOLDER)
+      googleSignInClient = GoogleSignIn.getClient(activity, builder.build())
+      googleSignInClient?.silentSignIn()?.addOnCompleteListener { task ->
+        pendingOperation = PendingOperation(Methods.silentSignIn, result)
+        if (task.isSuccessful) {
+          val googleSignInAccount = task.result
+          handleSignInResult(googleSignInAccount!!)
+        } else {
+          Log.e("Error", "signInError", task.exception)
+          Log.i("ExplicitSignIn", "Trying explicit sign in")
+          explicitSignIn()
+        }
       }
     }
   }
@@ -282,6 +286,10 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
   //region ActivityResultListener
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
     if (requestCode == RC_SIGN_IN) {
+      if (resultCode == Activity.RESULT_CANCELED) {
+        hasUserCanceled = true
+        finishPendingOperationWithError("Operation canceled by user")
+      }
       val result = Auth.GoogleSignInApi.getSignInResultFromIntent(data)
       val signInAccount = result.signInAccount
       if (result.isSuccess && signInAccount != null) {
