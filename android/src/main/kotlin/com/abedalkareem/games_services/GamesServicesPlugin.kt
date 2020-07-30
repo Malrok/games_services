@@ -78,6 +78,8 @@ class GamesServicesPlugin(private var activity: Activity? = null) : FlutterPlugi
           explicitSignIn()
         }
       }
+    } else {
+      result.error("error", "Operation canceled by user", null)
     }
   }
 
